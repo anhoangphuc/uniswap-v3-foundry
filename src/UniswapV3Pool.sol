@@ -78,6 +78,8 @@ contract UniswapV3Pool {
         amount0 = 0.99897661834742528 ether;
         amount1 = 5000 ether;
 
+        liquidity += uint128(amount);
+
         uint256 balance0Before;
         uint256 balance1Before;
 

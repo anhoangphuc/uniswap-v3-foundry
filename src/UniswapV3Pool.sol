@@ -41,6 +41,12 @@ contract UniswapV3Pool {
         int24 tick;
     }
 
+    struct CallbackData {
+        address token0;
+        address token1;
+        address payer;
+    }
+
     Slot0 public slot0;
 
     // Amount of liquidity, L
@@ -49,28 +55,17 @@ contract UniswapV3Pool {
     mapping(int24 => Tick.Info) public ticks;
     mapping(bytes32 => Position.Info) public positions;
 
-    constructor(
-        address token0_,
-        address token1_,
-        uint160 sqrtPriceX96,
-        int24 tick
-    ) {
+    constructor(address token0_, address token1_, uint160 sqrtPriceX96, int24 tick) {
         token0 = token0_;
         token1 = token1_;
-        slot0 = Slot0({ sqrtPriceX96: sqrtPriceX96, tick: tick });
+        slot0 = Slot0({sqrtPriceX96: sqrtPriceX96, tick: tick});
     }
 
-    function mint(
-        address owner,
-        int24 lowerTick,
-        int24 upperTick,
-        uint128 amount
-    ) external returns (uint256 amount0, uint256 amount1) {
-        if (
-            lowerTick >= upperTick ||
-            lowerTick < MIN_TICK ||
-            upperTick > MAX_TICK
-        ) revert InvalidTickRange();
+    function mint(address owner, int24 lowerTick, int24 upperTick, uint128 amount, bytes calldata data)
+        external
+        returns (uint256 amount0, uint256 amount1)
+    {
+        if (lowerTick >= upperTick || lowerTick < MIN_TICK || upperTick > MAX_TICK) revert InvalidTickRange();
 
         if (amount == 0) revert ZeroLiquidity();
 
@@ -80,9 +75,8 @@ contract UniswapV3Pool {
         Position.Info storage position = positions.get(owner, lowerTick, upperTick);
         position.update(amount);
 
-        amount0 = 0.998976618347425280 ether;
+        amount0 = 0.99897661834742528 ether;
         amount1 = 5000 ether;
-
 
         uint256 balance0Before;
         uint256 balance1Before;
@@ -90,23 +84,17 @@ contract UniswapV3Pool {
         if (amount0 > 0) balance0Before = balance0();
         if (amount1 > 0) balance1Before = balance1();
 
-        IUniswapV3MintCallback(msg.sender).uniswapV3MintCallback(amount0, amount1, "0x");
+        IUniswapV3MintCallback(msg.sender).uniswapV3MintCallback(amount0, amount1, data);
 
-        if (amount0 > 0 && balance0Before + amount0 > balance0())
+        if (amount0 > 0 && balance0Before + amount0 > balance0()) {
             revert InsufficientInputAmount();
-        
-        if (amount1 > 0 && balance1Before + amount1 > balance1())
-            revert InsufficientInputAmount();
+        }
 
-        emit Mint(
-            msg.sender,
-            owner,
-            lowerTick,
-            upperTick,
-            amount,
-            amount0,
-            amount1
-        );
+        if (amount1 > 0 && balance1Before + amount1 > balance1()) {
+            revert InsufficientInputAmount();
+        }
+
+        emit Mint(msg.sender, owner, lowerTick, upperTick, amount, amount0, amount1);
     }
 
     function balance0() internal returns (uint256 balance) {

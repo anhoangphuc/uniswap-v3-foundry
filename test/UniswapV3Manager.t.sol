@@ -43,8 +43,8 @@ contract UniswapV3ManagerTest is Test, TestUtils {
         });
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
 
-        uint256 expectedAmount0 = 0.99897661834742528 ether;
-        uint256 expectedAmount1 = 5000 ether;
+        uint256 expectedAmount0 = 0.998833192822975409 ether;
+        uint256 expectedAmount1 = 4999.187247111820044641 ether;
         assertEq(poolBalance0, expectedAmount0, "incorrect token0 deposited amount");
         assertEq(poolBalance1, expectedAmount1, "incorrect token1 deposited amount");
         assertEq(token0.balanceOf(address(pool)), expectedAmount0);

@@ -38,7 +38,7 @@ contract UniswapV3PoolTest is Test, TestUtils {
             usdcBalance: 5000 ether,
             currentTick: 85176,
             lowerTick: 84222,
-            upperTick: 86219,
+            upperTick: 86129,
             liquidity: 1517882343751509868544,
             currentSqrtP: 5602277097478614198912276234240,
             transferInMintCallback: true,
@@ -48,8 +48,8 @@ contract UniswapV3PoolTest is Test, TestUtils {
 
         (uint256 poolBalance0, uint256 poolBalance1) = setupTestCase(params);
 
-        uint256 expectedAmount0 = 0.99897661834742528 ether;
-        uint256 expectedAmount1 = 5000 ether;
+        uint256 expectedAmount0 = 0.998833192822975409 ether;
+        uint256 expectedAmount1 = 4999.187247111820044641 ether;
         assertEq(poolBalance0, expectedAmount0, "incorrect token0 deposited amount");
         assertEq(poolBalance1, expectedAmount1, "incorrect token1 deposited amount");
 
@@ -120,7 +120,7 @@ contract UniswapV3PoolTest is Test, TestUtils {
             usdcBalance: 5000 ether,
             currentTick: 85176,
             lowerTick: 84222,
-            upperTick: 86219,
+            upperTick: 86129,
             liquidity: 1517882343751509868544,
             currentSqrtP: 5602277097478614198912276234240,
             transferInMintCallback: true,
@@ -138,15 +138,18 @@ contract UniswapV3PoolTest is Test, TestUtils {
             UniswapV3Pool.CallbackData({token0: address(token0), token1: address(token1), payer: address(this)});
 
         int256 userBalance0Before = int256(token0.balanceOf(address(this)));
+        int256 userBalance1Before = int256(token1.balanceOf(address(this)));
 
-        (int256 amount0Delta, int256 amount1Delta) = pool.swap(address(this), abi.encode(extra));
-        assertEq(amount0Delta, -0.008396714242162444 ether, "invalid ETH out");
+        (int256 amount0Delta, int256 amount1Delta) = pool.swap(address(this), false, swapAmount, abi.encode(extra));
+        assertEq(amount0Delta, -0.008396714242162445 ether, "invalid ETH out");
         assertEq(amount1Delta, 42 ether, "invalid USDC in");
 
         assertEq(
             token0.balanceOf(address(this)), uint256(userBalance0Before - amount0Delta), "invalid user ETH balance"
         );
-        assertEq(token1.balanceOf(address(this)), 0, "invalid user USDC balance");
+        assertEq(
+            token1.balanceOf(address(this)), uint256(userBalance1Before - amount1Delta), "invalid user USDC balance"
+        );
 
         assertEq(
             token0.balanceOf(address(pool)), uint256(int256(poolBalance0) + amount0Delta), "invalid pool ETH balance"
@@ -177,7 +180,7 @@ contract UniswapV3PoolTest is Test, TestUtils {
         setupTestCase(params);
 
         vm.expectRevert(encodeError("InsufficientInputAmount()"));
-        pool.swap(address(this), "");
+        pool.swap(address(this), false, 42 ether, "");
     }
 
     //------------------------------CALLBACK------------------------------

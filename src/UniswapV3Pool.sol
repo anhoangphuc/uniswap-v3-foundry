@@ -7,9 +7,11 @@ import "./interfaces/IUniswapV3SwapCallback.sol";
 
 import "./lib/Tick.sol";
 import "./lib/Position.sol";
+import "./lib/TickBitmap.sol";
 
 contract UniswapV3Pool {
     using Tick for mapping(int24 => Tick.Info);
+    using TickBitmap for mapping(int16 => uint256);
     using Position for mapping(bytes32 => Position.Info);
     using Position for Position.Info;
 
@@ -64,6 +66,7 @@ contract UniswapV3Pool {
     uint128 public liquidity;
 
     mapping(int24 => Tick.Info) public ticks;
+    mapping(int16 => uint256) public tickBitmap;
     mapping(bytes32 => Position.Info) public positions;
 
     constructor(address token0_, address token1_, uint160 sqrtPriceX96, int24 tick) {
@@ -80,8 +83,16 @@ contract UniswapV3Pool {
 
         if (amount == 0) revert ZeroLiquidity();
 
-        ticks.update(lowerTick, amount);
-        ticks.update(upperTick, amount);
+        bool flippedLower = ticks.update(lowerTick, amount);
+        bool flippedUpper = ticks.update(upperTick, amount);
+
+        if (flippedLower) {
+            tickBitmap.flipTick(lowerTick, 1);
+        }
+
+        if (flippedUpper) {
+            tickBitmap.flipTick(upperTick, 1);
+        }
 
         Position.Info storage position = positions.get(owner, lowerTick, upperTick);
         position.update(amount);

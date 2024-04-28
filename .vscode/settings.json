@@ -3,5 +3,6 @@
   "solidity.packageDefaultDependenciesDirectory": "lib",
   "solidity.remappings": [
     "forge-std/=lib/forge-std/src/",
+    "prb-math/=lib/prb-math/src/",
   ]
 }

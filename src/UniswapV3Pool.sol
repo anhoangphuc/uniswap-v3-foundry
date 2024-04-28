@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.14;
+pragma solidity 0.8.19;
 
 import "./interfaces/IERC20.sol";
 import "./interfaces/IUniswapV3MintCallback.sol";
 import "./interfaces/IUniswapV3SwapCallback.sol";
 
 import "./lib/Tick.sol";
+import "./lib/Math.sol";
+import "./lib/TickMath.sol";
 import "./lib/Position.sol";
 import "./lib/TickBitmap.sol";
 
@@ -97,8 +99,10 @@ contract UniswapV3Pool {
         Position.Info storage position = positions.get(owner, lowerTick, upperTick);
         position.update(amount);
 
-        amount0 = 0.99897661834742528 ether;
-        amount1 = 5000 ether;
+        Slot0 memory slot0_ = slot0;
+
+        amount0 = Math.calcAmount0Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(upperTick), amount);
+        amount1 = Math.calcAmount1Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(lowerTick), amount);
 
         liquidity += uint128(amount);
 

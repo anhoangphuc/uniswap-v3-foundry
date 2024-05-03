@@ -19,6 +19,10 @@ abstract contract TestUtils is Test {
         return abi.encode(IUniswapV3Pool.CallbackData({token0: token0_, token1: token1_, payer: payer}));
     }
 
+    function encodeSlippageCheckFailed(uint256 amount0, uint256 amount1) internal pure returns (bytes memory encoded) {
+        encoded = abi.encodeWithSignature("SlippageCheckFailed(uint256,uint256)", amount0, amount1);
+    }
+
     function tick(uint256 price) internal pure returns (int24 tick_) {
         tick_ = TickMath.getTickAtSqrtRatio(
             uint160(int160(ABDKMath64x64.sqrt(int128(int256(price << 64))) << (FixedPoint96.RESOLUTION - 64)))

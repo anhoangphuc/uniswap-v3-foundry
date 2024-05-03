@@ -123,7 +123,7 @@ contract UniswapV3Pool is IUniswapV3Pool {
                 TickMath.getSqrtRatioAtTick(lowerTick), TickMath.getSqrtRatioAtTick(upperTick), amount
             );
         } else if (slot0_.tick < upperTick) {
-            amount0 = Math.calcAmount0Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(lowerTick), amount);
+            amount0 = Math.calcAmount0Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(upperTick), amount);
             amount1 = Math.calcAmount1Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(lowerTick), amount);
             liquidity = LiquidityMath.addLiquidity(liquidity, int128(amount));
         } else {

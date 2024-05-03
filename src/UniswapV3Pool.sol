@@ -1,18 +1,21 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: Unlicensed
 pragma solidity 0.8.19;
 
 import "./interfaces/IERC20.sol";
 import "./interfaces/IUniswapV3MintCallback.sol";
 import "./interfaces/IUniswapV3SwapCallback.sol";
+import "./interfaces/IUniswapV3FlashCallback.sol";
+import "./interfaces/IUniswapV3Pool.sol";
 
 import "./lib/Tick.sol";
 import "./lib/Math.sol";
 import "./lib/SwapMath.sol";
 import "./lib/TickMath.sol";
+import "./lib/LiquidityMath.sol";
 import "./lib/Position.sol";
 import "./lib/TickBitmap.sol";
 
-contract UniswapV3Pool {
+contract UniswapV3Pool is IUniswapV3Pool {
     using Tick for mapping(int24 => Tick.Info);
     using TickBitmap for mapping(int16 => uint256);
     using Position for mapping(bytes32 => Position.Info);
@@ -21,6 +24,8 @@ contract UniswapV3Pool {
     error InvalidTickRange();
     error ZeroLiquidity();
     error InsufficientInputAmount();
+    error InvalidPriceLimit();
+    error NotEnoughLiquidity();
 
     event Mint(
         address sender,
@@ -57,22 +62,18 @@ contract UniswapV3Pool {
         int24 tick;
     }
 
-    struct CallbackData {
-        address token0;
-        address token1;
-        address payer;
-    }
-
     struct SwapState {
         uint256 amountSpecifiedRemaining;
         uint256 amountCalculated;
         uint160 sqrtPriceX96;
         int24 tick;
+        uint128 liquidity;
     }
 
     struct StepState {
         uint160 sqrtPriceStartX96;
         int24 nextTick;
+        bool initialized;
         uint160 sqrtPriceNextX96;
         uint256 amountIn;
         uint256 amountOut;
@@ -101,8 +102,8 @@ contract UniswapV3Pool {
 
         if (amount == 0) revert ZeroLiquidity();
 
-        bool flippedLower = ticks.update(lowerTick, amount);
-        bool flippedUpper = ticks.update(upperTick, amount);
+        bool flippedLower = ticks.update(lowerTick, int128(amount), false);
+        bool flippedUpper = ticks.update(upperTick, int128(amount), true);
 
         if (flippedLower) {
             tickBitmap.flipTick(lowerTick, 1);
@@ -117,14 +118,19 @@ contract UniswapV3Pool {
 
         Slot0 memory slot0_ = slot0;
 
-        amount0 = Math.calcAmount0Delta(
-            TickMath.getSqrtRatioAtTick(slot0_.tick), TickMath.getSqrtRatioAtTick(upperTick), amount
-        );
-        amount1 = Math.calcAmount1Delta(
-            TickMath.getSqrtRatioAtTick(slot0_.tick), TickMath.getSqrtRatioAtTick(lowerTick), amount
-        );
-
-        liquidity += uint128(amount);
+        if (slot0_.tick < lowerTick) {
+            amount0 = Math.calcAmount0Delta(
+                TickMath.getSqrtRatioAtTick(lowerTick), TickMath.getSqrtRatioAtTick(upperTick), amount
+            );
+        } else if (slot0_.tick < upperTick) {
+            amount0 = Math.calcAmount0Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(lowerTick), amount);
+            amount1 = Math.calcAmount1Delta(slot0_.sqrtPriceX96, TickMath.getSqrtRatioAtTick(lowerTick), amount);
+            liquidity = LiquidityMath.addLiquidity(liquidity, int128(amount));
+        } else {
+            amount1 = Math.calcAmount1Delta(
+                TickMath.getSqrtRatioAtTick(lowerTick), TickMath.getSqrtRatioAtTick(upperTick), amount
+            );
+        }
 
         uint256 balance0Before;
         uint256 balance1Before;
@@ -145,39 +151,69 @@ contract UniswapV3Pool {
         emit Mint(msg.sender, owner, lowerTick, upperTick, amount, amount0, amount1);
     }
 
-    function swap(address recipient, bool zeroForOne, uint256 amountSpecified, bytes calldata data)
-        public
-        returns (int256 amount0, int256 amount1)
-    {
+    function swap(
+        address recipient,
+        bool zeroForOne,
+        uint256 amountSpecified,
+        uint160 sqrtPriceLimitX96,
+        bytes calldata data
+    ) public returns (int256 amount0, int256 amount1) {
         Slot0 memory slot0_ = slot0;
+        uint128 liquidity_ = liquidity;
+
+        if (
+            zeroForOne
+                ? sqrtPriceLimitX96 > slot0_.sqrtPriceX96 || sqrtPriceLimitX96 < TickMath.MIN_SQRT_RATIO
+                : sqrtPriceLimitX96 < slot0_.sqrtPriceX96 || sqrtPriceLimitX96 > TickMath.MAX_SQRT_RATIO
+        ) revert InvalidPriceLimit();
 
         SwapState memory state = SwapState({
             amountSpecifiedRemaining: amountSpecified,
             amountCalculated: 0,
             sqrtPriceX96: slot0_.sqrtPriceX96,
-            tick: slot0_.tick
+            tick: slot0_.tick,
+            liquidity: liquidity_
         });
 
-        while (state.amountSpecifiedRemaining > 0) {
+        while (state.amountSpecifiedRemaining > 0 && state.sqrtPriceX96 != sqrtPriceLimitX96) {
             StepState memory step;
             step.sqrtPriceStartX96 = state.sqrtPriceX96;
 
-            (step.nextTick,) = tickBitmap.nextInitializedTickWithinOneWord(state.tick, 1, zeroForOne);
+            (step.nextTick, step.initialized) = tickBitmap.nextInitializedTickWithinOneWord(state.tick, 1, zeroForOne);
 
             step.sqrtPriceNextX96 = TickMath.getSqrtRatioAtTick(step.nextTick);
 
             (state.sqrtPriceX96, step.amountIn, step.amountOut) = SwapMath.computeSwapStep(
-                step.sqrtPriceStartX96, step.sqrtPriceNextX96, liquidity, state.amountSpecifiedRemaining
+                state.sqrtPriceX96,
+                (zeroForOne ? step.sqrtPriceNextX96 < sqrtPriceLimitX96 : step.sqrtPriceNextX96 > sqrtPriceLimitX96)
+                    ? sqrtPriceLimitX96
+                    : step.sqrtPriceNextX96,
+                state.liquidity,
+                state.amountSpecifiedRemaining
             );
 
             state.amountSpecifiedRemaining -= step.amountIn;
             state.amountCalculated += step.amountOut;
-            state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+
+            if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
+                if (step.initialized) {
+                    int128 liquidityDelta = ticks.cross(step.nextTick);
+                    if (zeroForOne) liquidityDelta = -liquidityDelta;
+
+                    state.liquidity = LiquidityMath.addLiquidity(state.liquidity, liquidityDelta);
+                    if (state.liquidity == 0) revert NotEnoughLiquidity();
+                }
+                state.tick = zeroForOne ? step.nextTick - 1 : step.nextTick;
+            } else if (state.sqrtPriceX96 != step.sqrtPriceStartX96) {
+                state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+            }
         }
 
         if (state.tick != slot0_.tick) {
             (slot0.sqrtPriceX96, slot0.tick) = (state.sqrtPriceX96, state.tick);
         }
+
+        if (liquidity_ != state.liquidity) liquidity = state.liquidity;
 
         (amount0, amount1) = zeroForOne
             ? (int256(amountSpecified - state.amountSpecifiedRemaining), -int256(state.amountCalculated))
@@ -204,6 +240,19 @@ contract UniswapV3Pool {
         }
 
         emit Swap(msg.sender, recipient, amount0, amount1, slot0.sqrtPriceX96, liquidity, slot0.tick);
+    }
+
+    function flash(uint256 amount0, uint256 amount1, bytes calldata data) public {
+        uint256 balance0Before = balance0();
+        uint256 balance1Before = balance1();
+
+        if (amount0 > 0) IERC20(token0).transfer(msg.sender, amount0);
+        if (amount1 > 0) IERC20(token1).transfer(msg.sender, amount1);
+
+        IUniswapV3FlashCallback(msg.sender).uniswapV3FlashCallback(data);
+
+        require(balance0() >= balance0Before);
+        require(balance1() >= balance1Before);
     }
 
     function balance0() internal returns (uint256 balance) {

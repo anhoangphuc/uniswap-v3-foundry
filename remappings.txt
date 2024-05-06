@@ -1,3 +1,4 @@
 forge-std/=lib/forge-std/src/
 prb-math/=lib/prb-math/src/
 abdk-math/=lib/abdk-libraries-solidity/
+bytes-utils/=lib/solidity-bytes-utils/contracts
